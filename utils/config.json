@@ -6,7 +6,7 @@
     "ALERT": true,
     "Threshold": 5,
     "Thread": false,
-    "Log": false,
+    "Log": true,
     "Scheduler": false,
     "Timer": false
 }

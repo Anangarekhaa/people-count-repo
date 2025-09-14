@@ -12,12 +12,15 @@ import datetime
 import schedule
 import logging
 import imutils
+import os
 import time
 import dlib
 import json
 import csv
 import cv2
 
+
+CSV_FILE = 'utils/data/logs/counting_data.csv'
 # execution start time
 start_time = time.time()
 # setup logger
@@ -46,25 +49,46 @@ def parse_arguments():
     args = vars(ap.parse_args())
     return args
 
+
+def init_csv():
+    """Initialize CSV with headers (fresh file each run)."""
+    with open(CSV_FILE, 'w', newline='') as myfile:
+        wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+        wr.writerow(("Move In", "In Time", "Move Out", "Out Time", "Total"))
+
+
+
+
 def send_mail():
 	# function to send the email alerts
 	Mailer().send(config["Email_Receive"])
 
-def log_data(move_in, in_time, move_out, out_time):
-	# function to log the counting data
-	data = [move_in, in_time, move_out, out_time]
-	# transpose the data to align the columns properly
-	export_data = zip_longest(*data, fillvalue = '')
+def log_new_entry(move_in, in_time, move_out, out_time, total):
+    """
+    Append only the latest entry to CSV with total count.
+    """
+    latest_move_in = move_in[-1:] if move_in else []
+    latest_in_time = in_time[-1:] if in_time else []
+    latest_move_out = move_out[-1:] if move_out else []
+    latest_out_time = out_time[-1:] if out_time else []
+    latest_total = total[-1:] if total else []
 
-	with open('utils/data/logs/counting_data.csv', 'w', newline = '') as myfile:
-		wr = csv.writer(myfile, quoting = csv.QUOTE_ALL)
-		if myfile.tell() == 0: # check if header rows are already existing
-			wr.writerow(("Move In", "In Time", "Move Out", "Out Time"))
-			wr.writerows(export_data)
+    export_data = zip_longest(
+        latest_move_in, latest_in_time,
+        latest_move_out, latest_out_time,
+        latest_total, fillvalue=''
+    )
+
+    with open(CSV_FILE, 'a', newline='') as myfile:
+        wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+        wr.writerows(export_data)
 
 def people_counter():
 	# main function for people_counter.py
 	args = parse_arguments()
+
+	init_csv()
+
 	# initialize the list of class labels MobileNet SSD was trained to detect
 	CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
 		"bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
@@ -92,6 +116,8 @@ def people_counter():
 	# the first frame from the video)
 	W = None
 	H = None
+	screen_width = W 
+	screen_height = H
 
 	# instantiate our centroid tracker, then initialize a list to store
 	# each of our dlib correlation trackers, followed by a dictionary to
@@ -145,7 +171,7 @@ def people_counter():
 		if args["output"] is not None and writer is None:
 			fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 			writer = cv2.VideoWriter(args["output"], fourcc, 30,
-				(W, H), True)
+				(screen_width, screen_height), True)
 
 		# initialize the current status along with our list of bounding
 		# box rectangles returned by either (1) our object detector or
@@ -224,9 +250,13 @@ def people_counter():
 		# draw a horizontal line in the center of the frame -- once an
 		# object crosses this line we will determine whether they were
 		# moving 'up' or 'down'
-		cv2.line(frame, (W // 2, 0), (W // 2, H), (0, 0, 0), 3)
-		cv2.putText(frame, "-Prediction border - Entrance-", (W // 2 + 10, H - ((i * 20) + 200)),
-			cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+		# cv2.line(frame, (W // 2, 0), (W // 2, H), (0, 0, 0), 3)
+		# cv2.putText(frame, "-Prediction border - Entrance-", (W // 2 + 10, H - ((i * 20) + 200)),
+		# 	cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+		cv2.line(frame, (0, H // 2), (W, H // 2), (0, 0, 0), 3)
+		cv2.putText(frame, "- Entrance-", (10, H // 2 - 10),
+			  cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+			  
 
 		# use the centroid tracker to associate the (1) old object
 		# centroids with (2) the newly computed object centroids
@@ -255,40 +285,52 @@ def people_counter():
 
 				# check to see if the object has been counted or not
 				if not to.counted:
-					# if the direction is negative (indicating the object
-					# is moving up) AND the centroid is above the center
-					# line, count the object
+				# moving up (exit)
 					if direction < 0 and centroid[1] < H // 2:
 						totalUp += 1
 						date_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 						move_out.append(totalUp)
 						out_time.append(date_time)
-						to.counted = True
+						current_total = len(move_in) - len(move_out)
 
-					# if the direction is positive (indicating the object
-					# is moving down) AND the centroid is below the
-					# center line, count the object
+						# update total inside
+						total.append(current_total)
+						
+
+						# log the latest entry to CSV
+						if config["Log"]:
+							log_new_entry(move_in, in_time, move_out, out_time, total)
+						to.counted = True
+                   
+				# moving down (enter)
 					elif direction > 0 and centroid[1] > H // 2:
 						totalDown += 1
 						date_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 						move_in.append(totalDown)
 						in_time.append(date_time)
-						# if the people limit exceeds over threshold, send an email alert
-						if sum(total) >= config["Threshold"]:
-							cv2.putText(frame, "-ALERT: People limit exceeded-", (10, frame.shape[0] - 80),
-								cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 2)
-							if config["ALERT"]:
-								logger.info("Sending email alert..")
-								email_thread = threading.Thread(target = send_mail)
-								email_thread.daemon = True
-								email_thread.start()
-								logger.info("Alert sent!")
-						to.counted = True
-						# compute the sum of total people inside
-						total = []
-						total.append(len(move_in) - len(move_out))
+						
 
-			# store the trackable object in our dictionary
+						# update total inside
+						current_total = len(move_in) - len(move_out)
+						total.append(current_total)
+
+					# log the latest entry to CSV
+						if config["Log"]:
+							log_new_entry(move_in, in_time, move_out, out_time, total)
+						to.counted = True
+
+					# if the people limit exceeds the threshold, send an alert
+					if total and total[-1] >= config["Threshold"]:
+						cv2.putText(frame, "-ALERT: People limit exceeded-", (10, frame.shape[0] - 80),
+									cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 2)
+						if config["ALERT"]:
+							logger.info("Sending email alert..")
+							email_thread = threading.Thread(target=send_mail)
+							email_thread.daemon = True
+							email_thread.start()
+							logger.info("Alert sent!")
+
+			# store the trackable object in the dictionary
 			trackableObjects[objectID] = to
 
 			# draw both the ID of the object and the centroid of the
@@ -306,7 +348,7 @@ def people_counter():
 		]
 
 		info_total = [
-		("Total people inside", ', '.join(map(str, total))),
+		("Total people inside", total[-1] if total else 0),
 		]
 
 		# display the output
@@ -320,13 +362,15 @@ def people_counter():
 
 		# initiate a simple log to save the counting data
 		if config["Log"]:
-			log_data(move_in, in_time, move_out, out_time)
+			log_new_entry(move_in, in_time, move_out, out_time,total)
 
 		# check to see if we should write the frame to disk
 		if writer is not None:
 			writer.write(frame)
 
 		# show the output frame
+		cv2.namedWindow("Real-Time Monitoring/Analysis Window", cv2.WND_PROP_FULLSCREEN)
+		cv2.setWindowProperty("Real-Time Monitoring/Analysis Window", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 		cv2.imshow("Real-Time Monitoring/Analysis Window", frame)
 		key = cv2.waitKey(1) & 0xFF
 		# if the `q` key was pressed, break from the loop
