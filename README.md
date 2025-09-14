@@ -170,19 +170,8 @@ if num_seconds > 28800:
 
 ---
 
-## References
 
-***Main:***
-
-- SSD paper: https://arxiv.org/abs/1512.02325
-- MobileNets paper: https://arxiv.org/abs/1704.04861
-- Centroid tracker: https://www.pyimagesearch.com/2018/07/23/simple-object-tracking-with-opencv/
-
-***Optional:***
-
-- Object detection with SSD/MobileNets: https://pyimagesearch.com/2017/09/11/object-detection-with-deep-learning-and-opencv/
-- Schedule: https://pypi.org/project/schedule/
 
 ---
 
-*saimj7/ 19-08-2020 - © <a href="http://saimj7.github.io" target="_blank">Sai_Mj</a>.*
+
